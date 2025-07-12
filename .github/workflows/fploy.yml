@@ -1,0 +1,46 @@
+name: destroy the infrastructure 2 # Or "Destroy Infrastructure" for clarity
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: 'Deployment stage'
+        required: true
+        default: 'dev'
+        options:
+          - dev
+          - qa
+          - prod
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Do something risky
+        run: exit 1  # Force failure for demo
+
+  upload_logs_on_failure:
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ failure() }}  # Run ONLY if previous job fails
+    steps:
+      - name: Download workflow logs
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const logs = await github.rest.actions.downloadWorkflowRunLogs({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId,
+            });
+            return logs.data;
+      - name: Upload to S3
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - run: |
+          echo "${{ steps.download_logs.outputs.result }}" > logs.zip
+          aws s3 cp logs.zip s3://your-bucket/failed-logs/${{ github.run_id }}.zip
