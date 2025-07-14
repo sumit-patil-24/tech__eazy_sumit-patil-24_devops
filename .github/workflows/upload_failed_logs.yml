@@ -1,0 +1,61 @@
+name: Upload Failed Workflow Logs to S3
+
+on:
+  workflow_run:
+    workflows: ["destroy the infrastructure"]
+    types:
+      - completed
+
+jobs:
+  upload_logs:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }} 
+    
+    permissions:
+      contents: read # Required for actions that interact with repo contents
+      id-token: write # Required for AWS OIDC authentication
+      actions: read   # Required for 'gh run view --log' to fetch workflow logs
+
+    steps:
+      - name: Checkout Repository # ADD THIS STEP!
+        uses: actions/checkout@v4 # Use the latest stable version
+
+      - name: Configure AWS Credentials for S3 Operations
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::339712898435:role/GitHubActionsS3UploadRole
+          aws-region: us-east-1 # Your AWS Region
+
+      - name: Fetch and Prepare Workflow Logs
+        id: fetch_logs # Give this step an ID to output the log file path
+        run: |
+          # Use gh CLI to fetch the full consolidated log for the failed workflow run
+          WORKFLOW_LOG_FILENAME="workflow_run_${{ github.event.workflow_run.id }}_logs.txt"
+          
+          echo "Fetching logs for run ID ${{ github.event.workflow_run.id }}..."
+          gh run view ${{ github.event.workflow_run.id }} --log > "${WORKFLOW_LOG_FILENAME}"
+          
+          if [ ! -s "${WORKFLOW_LOG_FILENAME}" ]; then
+            echo "Error: Log file '${WORKFLOW_LOG_FILENAME}' is empty or not created. Exiting."
+            exit 1
+          fi
+
+          echo "Log file saved as: ${WORKFLOW_LOG_FILENAME}"
+          echo "log_file_path=${WORKFLOW_LOG_FILENAME}" >> $GITHUB_OUTPUT
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Ensure gh CLI is authenticated
+
+      - name: Upload Logs to S3
+        id: upload_logs_to_s3 # Give this step an ID for its output
+        run: |
+          LOCAL_LOG_PATH="${{ steps.fetch_logs.outputs.log_file_path }}"
+          
+          # Define the S3 key for the uploaded plain text log file
+          # IMPORTANT: S3 keys are case-sensitive. The workflow name will be used as is.
+          S3_LOG_KEY="failed-workflow-logs/${{ github.event.workflow_run.name }}/${{ github.event.workflow_run.id }}_full_logs.txt"
+          S3_FULL_PATH="s3://sumit-4254/${S3_LOG_KEY}"
+          
+          echo "Uploading ${LOCAL_LOG_PATH} to ${S3_FULL_PATH}..."
+          aws s3 cp "${LOCAL_LOG_PATH}" "${S3_FULL_PATH}"
+          
+          echo "uploaded_s3_path=${S3_FULL_PATH}" >> $GITHUB_OUTPUT

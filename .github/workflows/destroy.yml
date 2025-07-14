@@ -16,7 +16,17 @@ on:
 jobs:
   destroy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read  # <-- ENSURE THIS IS PRESENT
     steps:
+      - name: Validate input
+        run: |
+          if [[ "${{ github.event.inputs.stage }}" != "dev" && "${{ github.event.inputs.stage }}" != "qa" && "${{ github.event.inputs.stage }}" != "prod" ]]; then
+            echo "Invalid input: ${{ github.event.inputs.stage }}. Please use one of the following: dev, qa, prod."
+            exit 1
+          fi
+          
       - name: Checkout code
         uses: actions/checkout@v2
   
@@ -44,9 +54,8 @@ jobs:
           TF_VAR_github_token: ${{ secrets.GH_TOKEN }}
         run: |
           terraform init
+          fdfdfdf
           VAR_FILE="config/${{ github.event.inputs.stage }}.json"
           terraform destroy -var-file="$VAR_FILE" --auto-approve \
             -var "stage=${{ github.event.inputs.stage }}"
         working-directory: ./terraform
-      
-
